@@ -23,7 +23,7 @@ public class OpenWeatherMapAPI extends APITools{
     // This is the base url needed for the current weather notice the "weather" after 2.5/
     private String baseCurrentWeather = "http://api.openweathermap.org/data/2.5/weather?q=";
     // This is the base url needed for the forecast notice the "forecast" after 2.5/
-    private String baseForecastWeather = "http://api.openweathermap.org/data/2.5/forecast?q=";
+    private String baseForecastWeather = "https://api.openweathermap.org/data/2.5/onecall?lat=";
     // This is the base url needed for historical data
     private String baseHistoricalWeather = "https://api.openweathermap.org/data/2.5/onecall/timemachine?lat=";
     // This is the entire url needed for either the current or forecasted weather
@@ -38,7 +38,10 @@ public class OpenWeatherMapAPI extends APITools{
     // The unique API key
     private String API_KEY;
     // For the amount of days to look at
-    private int days;
+    private String part = "daily";
+    // For the lat and lon of a location
+    private double lat;
+    private double lon;
 
     // Used to create a connection with the API
     // URL
@@ -59,13 +62,6 @@ public class OpenWeatherMapAPI extends APITools{
     public OpenWeatherMapAPI(String location, String API_KEY){
         this.location = location;
         this.API_KEY = API_KEY;
-    }
-
-    // This one is only used for the forecasted weather using OWMAPI
-    public OpenWeatherMapAPI(String location, String API_KEY, int days){
-        this.location = location;
-        this.API_KEY = API_KEY;
-        this.days = days;
     }
 
     // Opens a connection for the current weather at a given location
@@ -104,32 +100,35 @@ public class OpenWeatherMapAPI extends APITools{
     // Opens a connection for the forecasted weather at a given location for x amount of days
     public void openForecastWeatherConnection() throws IOException{
 
-        apiUrl = (baseForecastWeather + URLEncoder.encode(location, "utf-8") + "&appid=" + API_KEY + "&units=" + units
-                + "&lang=" + lang + "&cnt=" + days);
+        lat = getLat();
+        lon = getLon();
 
-        // This adds the link to the requestConnection
-        requestConnection = new StringBuilder(apiUrl);
-        // These parts grab the url and creates a connection with the url : sets the request method type in this case "GET"
-        url = new URL(requestConnection.toString());
-        urlConnection = (HttpURLConnection)(url.openConnection());
-        urlConnection.setRequestMethod("GET"); // Can either be GET or POST
+        apiUrl = (baseForecastWeather + lat + "&lon=" + lon + "&appid=" + API_KEY + "&units=" + units
+                + "&lang=" + lang + "&exclude=current" + "&exclude=minutely" + "&exclude=hourly" + "&exclude=alerts");
 
-        // This adds the information being passed
-        response = new StringBuilder();
-        // Linked to urlConnection which is linked to the requestConnection StringBuilder -> this receives the information then appends
-        // to the response StringBuilder
-        reader = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
-        while((readLine = reader.readLine()) != null){
-            response.append(readLine);
-            //System.out.println(response); // For debugging purposes will delete later
-        }
+            // This adds the link to the requestConnection
+            requestConnection = new StringBuilder(apiUrl);
+            // These parts grab the url and creates a connection with the url : sets the request method type in this case "GET"
+            url = new URL(requestConnection.toString());
+            urlConnection = (HttpURLConnection)(url.openConnection());
+            urlConnection.setRequestMethod("GET"); // Can either be GET or POST
 
-        // Closes the connection and disconnects it
-        reader.close();
-        urlConnection.disconnect();
+            // This adds the information being passed
+            response = new StringBuilder();
+            // Linked to urlConnection which is linked to the requestConnection StringBuilder -> this receives the information then appends
+            // to the response StringBuilder
+            reader = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
+            while((readLine = reader.readLine()) != null){
+                response.append(readLine);
+                //System.out.println(response); // For debugging purposes will delete later
+            }
 
-        // We then interpret the data using a parse method
-        parseForecastWeather(response.toString(), days);
+            // Closes the connection and disconnects it
+            reader.close();
+            urlConnection.disconnect();
+
+            // We then interpret the data using a parse method
+            parseForecastWeather(response.toString());
     }
 
     // Opens a connection for the historical weather at a given location for the past three days based off the current date
@@ -143,8 +142,8 @@ public class OpenWeatherMapAPI extends APITools{
         long date;
 
         // Set the lat and lon to be used in the apiURL
-        double lat = getLat();
-        double lon = getLon();
+        lat = getLat();
+        lon = getLon();
 
         for(int i = 3; i > 0; i--){
             date = ((currentDayInMS - (msInDay * i)) / 1000);
@@ -180,12 +179,13 @@ public class OpenWeatherMapAPI extends APITools{
     // This method receives the information from response StringBuilder, then is found in the JSON object
     // and sets the cwList to the values needed/wanted for that day
     public void parseCurrentWeather(String response){
+
         // This will take in all the information, and then is stored in JSON Arrays
         JSONObject currentWeather = new JSONObject(response);
 
-        Object cwDT = currentWeather.get("dt");
+        Object cwDT = currentWeather.getLong("dt");
         JSONObject cwWind = currentWeather.getJSONObject("wind");
-        Object cwVis = currentWeather.get("visibility");
+        Object cwVis = currentWeather.getLong("visibility");
         // These will grab data corresponding to their key
         JSONArray cwWeatherValues = currentWeather.getJSONArray("weather");
         // This will hold the objects(more like Strings) from cwWeatherValues -> cwWeatherValues and cwMV go together
@@ -206,65 +206,54 @@ public class OpenWeatherMapAPI extends APITools{
             JSONObject cwRVGrab = currentWeather.getJSONObject("rain");
             // If both aren't true then there's no rain
             if(cwRVGrab.has("3h")){
-                cwList.add(cwRVGrab.get("3h") + " -> 3h"); // We can come up with a better way for this, right now is for debugging purposes
+                cwList.add(cwRVGrab.get("3h")); // We can come up with a better way for this, right now is for debugging purposes
             }else if(cwRVGrab.has("1h")){
-                cwList.add(cwRVGrab.get("1h") + " -> 1h");
+                cwList.add(cwRVGrab.get("1h"));
             }
         }
 
         // Passes the cwList to OpenWeatherMapTools
         setCwListValues(cwList);
+        convertCwListValues(response);
     }
 
     // This method receives the information from response StringBuilder, then is found in the JSON object
     // and sets the fwList to the values needed/wanted for the x(7 in this case) amount of days we want the forcasted weather
-    public void parseForecastWeather(String response, int days){
+    public void parseForecastWeather(String response){
         // This will take in all the information, and then is stored in JSON Arrays
         JSONObject forecastWeather = new JSONObject(response);
 
-        // These will grab data corresponding to their key
-        JSONArray fwListValues = forecastWeather.getJSONArray("list");
+        JSONArray fwListValues = forecastWeather.getJSONArray("daily");
 
-        // Needs to start at 0 because index 0 is actually the next day then it goes 1 being two days, etc...
-        for(int i = 0; i < days; i++){
-            // Linked to the JSONArray above this one will get us the forecasted weather for the x day
+        for(int i = 1; i <= 5; i++){
             JSONObject fwListValuesDay = fwListValues.getJSONObject(i);
 
             // These will be ordered the same way as the list
-            Object fwDT = fwListValuesDay.get("dt");
-            JSONObject fwWind = fwListValuesDay.getJSONObject("wind");
-            Object fwVis = fwListValuesDay.get("visibility");
-            // Values in the JSONArray "weather" are stored in this JSONArray
+            Object fwDT = fwListValuesDay.getLong("dt");
+            Object fwWind = fwListValuesDay.get("wind_speed");
             JSONArray fwWeatherValues = fwListValuesDay.getJSONArray("weather");
             JSONObject fwWV = fwWeatherValues.getJSONObject(0);
             // This doesn't require to get information from a JSONArray, skip that part
-            JSONObject fwMV = fwListValuesDay.getJSONObject("main");
+            JSONObject fwMV = fwListValuesDay.getJSONObject("temp");
 
             fwList.add(fwDT);
-            fwList.add(fwWind.get("speed"));
-            fwList.add(fwVis);
-            fwList.add(fwWV.get("description"));
-            fwList.add(fwMV.get("temp"));
-            fwList.add(fwMV.get("temp_min"));
-            fwList.add(fwMV.get("temp_max"));
+            fwList.add(fwWind);
+            fwList.add(fwWV.getString("description"));
+            fwList.add(fwMV.getDouble("min"));
+            fwList.add(fwMV.getDouble("max"));
 
-            // Checks to see if the current location is raining MUST GO LAST
+            //Checks to see if the current location is raining MUST GO LAST
             if(fwListValuesDay.has("rain")){
-                // This is used to grab the rain and it's broken down to just get the value instead of the entire JSONObject
-                // for example without fwRVGrab the format would look like this: {3h:0.46}
-                JSONObject fwRV = (JSONObject) fwListValues.get(i);
-                JSONObject fwRVGrab = (JSONObject) fwRV.get("rain");
-                // If both aren't true then there's no rain
-                if(fwRVGrab.has("3h")){
-                    fwList.add(fwRVGrab.get("3h") + " -> 3h"); // We can come up with a better way for this, right now is for debugging purposes
-                }else if(fwRVGrab.has("1h")){
-                    fwList.add(fwRVGrab.get("1h") + " -> 1h");
-                }
+                // This is used to grab the rain value
+                Object fwRV = fwListValuesDay.get("rain");
+
+                fwList.add(fwRV);
             }
         }
 
         // Passes the fwList to OpenWeatherMapTools
         setFwListValues(fwList);
+        convertFwListValues(fwListValues);
     }
 
     public void parseHistoricalWeather(String response){
@@ -275,26 +264,26 @@ public class OpenWeatherMapAPI extends APITools{
         JSONObject hwWV = hwWeatherValues.getJSONObject(0);
 
         // Add values wanted to the list
-        hwList.add(hwCurrent.get("dt")); // Time
-        hwList.add(hwCurrent.get("wind_speed"));
+        hwList.add(hwCurrent.getLong("dt")); // Time
+        hwList.add(hwCurrent.getDouble("wind_speed"));
         if(hwCurrent.has("visibility")){
-            hwList.add(hwCurrent.get("visibility")); // Sometimes it works, sometimes it doesn't
+            hwList.add(hwCurrent.getLong("visibility")); // Sometimes it works, sometimes it doesn't
         }
-        hwList.add(hwWV.get("description"));
-        hwList.add(hwCurrent.get("temp"));
-        hwList.add(hwCurrent.get("humidity"));
+        hwList.add(hwWV.getString("description"));
+        hwList.add(hwCurrent.getDouble("temp"));
+        hwList.add(hwCurrent.getDouble("humidity"));
 
         if(hwCurrent.has("rain")){
             JSONObject hwRain = hwCurrent.getJSONObject("rain");
-
             if(hwRain.has("3h")){
-                hwList.add(hwRain.get("3h") + " -> 3h"); // We can come up with a better way for this, right now is for debugging purposes
+                hwList.add(hwRain.getDouble("3h")); // We can come up with a better way for this, right now is for debugging purposes
             }else if(hwRain.has("1h")){
-                hwList.add(hwRain.get("1h") + " -> 1h");
+                hwList.add(hwRain.getDouble("1h"));
             }
         }
 
         // Passes the hwList to APITools
         setHwListValues(hwList);
+        convertHwListValues(hwCurrent);
     }
 }
